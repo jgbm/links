@@ -1142,3 +1142,7 @@ fun lf(f) {
     f(x)
   }
 }
+
+####
+sig addRoute : (String, (String) ~> Page) ~> ()
+fun addRoute(path,f) { unsafeAddRoute(path,fun (p) {renderPage (f(p))}) }

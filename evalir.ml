@@ -98,7 +98,7 @@ module Session = struct
           receive (Hashtbl.find backward p)
         else
           None
-      
+
   let fuse (out1, in1) (out2, in2) =
     let forward inp outp =
       (* Debug.print ("Forwarding from: "^string_of_int inp^ " to: " ^ string_of_int outp); *)
@@ -117,9 +117,15 @@ module Session = struct
       (unbox_port outp, unbox_port inp)
 end
 
-
 module Eval = struct
   open Ir
+
+  open Lwt
+  open Cohttp
+  open Cohttp_lwt_unix
+
+  type routing_table = (bool * string * Value.t) list (* directory? path (handler : (string)~>Page) *)
+  let rt = ref ([] : routing_table)
 
   exception EvaluationError of string
   exception Wrong
@@ -475,6 +481,44 @@ module Eval = struct
         unblock out1;
         unblock out2;
         apply cont env (value env end_bang, [])
+    | `PrimitiveFunction ("unsafeAddRoute", _), [pathv; handler] ->
+       begin
+         match pathv with
+         | `String path -> rt := (path.[String.length path - 1] = '/',
+                                  path,
+                                  handler) :: !rt;
+                           apply_cont cont env (`Record [])
+         | _ -> assert false
+       end
+    | `PrimitiveFunction ("startServer", _), [] ->
+       let is_prefix_of s t = String.length s <= String.length t && s = String.sub t 0 (String.length s) in
+       let callback rt env conn req body =
+         let query_args = List.map (fun (k, vs) -> (k, String.concat "," vs)) (Uri.query (Request.uri req)) in
+         let cgi_args = query_args @ Header.to_list (Request.headers req) in
+         let path = Uri.path (Request.uri req) in
+
+         let rec iter = function
+           | [] -> Server.respond_string ~status:`Not_found ~body:"<h1>Nope</h1>" ()
+           | ((dir, s, f) :: rest) when (dir && is_prefix_of s path) || (s = path) ->
+              begin
+                Lib.cgi_parameters := cgi_args;
+                try (
+                  apply cont env (f, [`String (Uri.path (Request.uri req))]);
+                  assert false
+                ) with
+                | TopLevel (_, `List [`XML body]) ->
+                   Lib.cohttp_server_response [] (Value.string_of_value (`XML body))
+              end
+           | (_ :: rest) -> iter rest in
+         iter rt in
+
+       let start_server host port rt env =
+         Conduit_lwt_unix.init ~src:host () >>= fun ctx ->
+         let ctx = Cohttp_lwt_unix_net.init ~ctx () in
+         Server.create ~ctx ~mode:(`TCP (`Port port)) (Server.make ~callback:(callback rt env) ()) in
+
+       Lwt_main.run (start_server (Settings.get_value Basicsettings.host_name) (Settings.get_value Basicsettings.port) !rt env);
+       assert false
     (*****************)
     | `PrimitiveFunction (n,None), args ->
 	apply_cont cont env (Lib.apply_pfun n args)

@@ -1339,10 +1339,10 @@ let env : (string * (located_primitive * Types.datatype * pure)) list = [
 
 	"lsNilF",
 	(`Client, datatype "() -> a", PURE);
-	
+
 	"lsCons",
 	(`Client, datatype "(a, b) -> c", PURE);
-	
+
 	"lsAt",
 	(`Client, datatype "(a, Int) -> c", PURE);
 
@@ -1351,7 +1351,7 @@ let env : (string * (located_primitive * Types.datatype * pure)) list = [
 
 	"lsZip",
 	(`Client, datatype "(a, b) -> c", PURE);
-(*	
+(*
 	"lsMap",
 	(`Client, datatype "((a) -b-> c, d) -b-> e", IMPURE);
 
@@ -1470,6 +1470,14 @@ let env : (string * (located_primitive * Types.datatype * pure)) list = [
                   Unix.shutdown (Unix.descr_of_in_channel inc) Unix.SHUTDOWN_SEND;
                   `Record [])),
      datatype "(Socket) ~> ()",
+     IMPURE);
+    "unsafeAddRoute",
+    (`PFun (fun _ -> assert false),
+     datatype "(String,(String) ~> a) ~> ()",
+     IMPURE);
+    "startServer",
+    (`PFun (fun _ -> assert false),
+     datatype "() ~> ()",
      IMPURE)
 ]
 
@@ -1602,8 +1610,6 @@ let apply_pfun name args =
     | Some var -> apply_pfun_by_code var args
     | None -> assert false
 
-
-
 let is_primitive name = List.mem_assoc name env
 
 let is_pure_primitive name =
@@ -1618,6 +1624,14 @@ let is_pure_primitive name =
     arguments [args]. *)
 let prim_appln name args = `Apply(`Variable(Env.String.lookup nenv name),
                                   args)
+
+let cohttp_server_response headers body =
+  let h = Cohttp.Header.add_list (Cohttp.Header.init ()) (headers @ !http_response_headers) in
+  Cohttp_lwt_unix.Server.respond_string
+    ?headers:(Some h)
+    ?status:(Cohttp.Code.status_of_code !http_response_code)
+    ?body:body
+    ()
 
 (** Output the headers and content to stdout *)
 let print_http_response headers body =

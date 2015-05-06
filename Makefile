@@ -2,7 +2,7 @@
 
 OCAMLMAKEFILE = ./OCamlMakefile
 
-PACKS=bigarray num str deriving.syntax deriving.syntax.classes deriving.runtime
+PACKS=bigarray num str deriving.syntax deriving.syntax.classes deriving.runtime lwt conduit.lwt-unix cohttp.lwt
 export OCAMLFLAGS=-syntax camlp4o
 
 PATH := $(PATH):deriving
@@ -117,7 +117,7 @@ SOURCES = $(OPC)                                \
           database.mli database.ml              \
           linksregex.ml                         \
           proc.mli proc.ml                      \
-          lib.mli lib.ml                        \
+	  lib.mli lib.ml                        \
           sugartoir.mli sugartoir.ml            \
           loader.mli loader.ml                  \
           $(DB_CODE)                            \
