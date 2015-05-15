@@ -412,8 +412,6 @@ struct
     val nenv = nenv
     val venv = venv
 
-    val closures = closures
-
     method private with_nenv nenv =
       {< nenv = nenv >}
 
@@ -472,7 +470,7 @@ struct
                           match strip_poly cont with
                             | `Variable f -> f
                             | v -> failwith ("don't know how to pickle this value on the client: "^ Ir.Show_value.show v) in
-                          
+
                         (* hereafter [cont] is a variable, [`Variable f] *)
 
                         let e, t, o = super#tail_computation e in
@@ -513,6 +511,57 @@ struct
     let program, _, _ = (new visitor envs)#program program in
       program
 end
+
+(* I'm going to need a marshalling environment here eventually, aren't I? *)
+let rec premarshal (valenv : Value.env) : Ir.binding list =
+  let find_primitive_binding s = Env.String.lookup Lib.nenv s in
+  let rec premarshal_val : Value.t -> Ir.binding list * Ir.value = function
+    | `Bool b -> [], (`Constant (`Bool b))
+    | `Char c -> [], (`Constant (`Char c))
+    | `Float f -> [], (`Constant  (`Float f))
+    | `Int i -> [], (`Constant (`Int i))
+    | `XML (Value.Node (s, xs)) ->
+       let rec build (name, attrs, bodies) = function
+         | Value.Text s -> (name, attrs, bodies @ [`Constant (`String s)])
+         | Value.Attr (k, v) -> (name, StringMap.add k (`Constant (`String v)) attrs, bodies)
+         | Value.Node (s, xs) -> (name, attrs, bodies @ [premarshal_xml s xs])
+       and premarshal_xml s xs = `XmlNode (List.fold_left build (s, StringMap.empty, []) xs) in
+       [], premarshal_xml s xs
+    | `XML (Value.Text s) -> [], `Constant (`String s)
+    | `XML _ -> assert false
+    | `String s -> [], `Constant (`String s)
+    | `List vs ->
+       let bss, vs' = List.split (List.map premarshal_val vs) in
+       List.concat bss,
+       List.fold_right (fun v lst -> `ApplyPure (`Variable (find_primitive_binding "Cons"), [v; lst]))
+                       vs' (`ApplyPure (`Variable (find_primitive_binding "Nil"), []))
+    | `Record fs ->
+       let (bss, fs') = List.split (List.map (fun (k, v) -> let (vs, v) = premarshal_val v in vs, (k, v)) fs) in
+       List.concat bss, `Extend (StringMap.from_alist fs', None)
+    | `Variant (tag, v) ->
+       let bs, v' = premarshal_val v in
+       [], `Inject (tag, v', `Not_typed)
+    | `RecFunction (ir_bindings, env, name, _) ->
+       let binder_of_name name =
+         (name, (`Not_typed, string_of_int name, `Local)) in
+       let to_ir_bindings =
+         let to_ir_binding (name, (params, body)) =
+           (binder_of_name name, ([], List.map binder_of_name params, body), `Unknown) in
+         List.map to_ir_binding in
+       let env' = premarshal env in
+       env' @ [`Rec (to_ir_bindings ir_bindings)], `Variable name
+    | `FunctionPtr (v, env) -> assert false
+    | `PrimitiveFunction (name, None) -> assert false
+    | `PrimitiveFunction (_, Some v) -> [], `Variable v
+    | `ClientFunction name -> assert false
+    | `Continuation c -> assert false
+    | `Socket p -> assert false in
+  let premarshal_binding name value =
+    let bs, v = premarshal_val value in
+    bs @ match v with
+         | `Variable name' when name == name' -> []
+         | _ -> [`Let ((name, (`Not_typed, string_of_int name, `Local)), ([], `Return v))] in
+  IntMap.fold (fun name (value, _) bs -> premarshal_binding name value @ bs) (Value.get_parameters valenv) []
 
 (** [cps_prims]: a list of primitive functions that need to see the
     current continuation. Calls to these are translated in CPS rather than
@@ -1061,10 +1110,10 @@ let initialise_envs (nenv, tyenv) =
   let tenv = Var.varify_env (nenv, tyenv.Types.var_env) in
     (nenv, venv, tenv)
 
-let generate_program_page ?(cgi_env=[]) ?(onload = "") (closures, nenv, tyenv) program  =
+let generate_program_page ?(cgi_env=[]) ?(onload = "") ?(fix_pickles=true) (closures, nenv, tyenv) program  =
   let printed_code = Loader.wpcache "irtojs" (fun () ->
     let nenv, venv, tenv = initialise_envs (nenv, tyenv) in
-    let program = FixPickles.program (closures, nenv, venv, tenv) program in
+    let program = if fix_pickles then FixPickles.program (closures, nenv, venv, tenv) program else program in
     let _, code = generate_program venv program in
     let code = wrap_with_server_stubs code in
     show code)

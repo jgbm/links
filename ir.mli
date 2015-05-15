@@ -51,6 +51,8 @@ type value =
   | `ApplyPure of value * value list
 
   | `Coerce of value * Types.datatype
+
+  | `Premarshaled of string   (* Unusuable on the client, but can be unpacked and used upon returning to the server *)
   ]
 and tail_computation =
   [ `Return of value

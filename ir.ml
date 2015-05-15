@@ -58,6 +58,8 @@ type value =
   | `ApplyPure of (value * value list)
 
   | `Coerce of (value * Types.datatype)
+
+  | `Premarshaled of string
   ]
 and tail_computation =
   [ `Return of (value)

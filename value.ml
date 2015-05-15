@@ -154,7 +154,7 @@ type primitive_value_basis =  [
 | `Char of char
 | `Float of float
 | `Int of number
-| `XML of xmlitem 
+| `XML of xmlitem
 | `String of string ]
   deriving (Show, Typeable, Eq, Pickle, Dump)
 
@@ -406,34 +406,38 @@ let uncompress_primitive_value : compressed_primitive_value -> [> primitive_valu
 
 let rec uncompress_continuation ((_globals, scopes, conts, _funs) as envs) cont
     : continuation =
-  List.map
-    (fun (var, env) ->
+  try (
+    List.map
+      (fun (var, env) ->
        let scope = IntMap.find var scopes in
        let body = IntMap.find var conts in
        let env = uncompress_env envs env in
        let locals = localise env var in
-         (scope, var, locals, body))
-    cont
+       (scope, var, locals, body))
+      cont
+  ) with NotFound str -> failwith("In uncompress_continuation : " ^ str)
 and uncompress_t ((globals, _scopes, _conts, funs) as envs:unmarshal_envs) v : t =
   let uv = uncompress_t envs in
+  try (
     match v with
       | #compressed_primitive_value as v -> uncompress_primitive_value v
       | `List vs -> `List (List.map uv vs)
       | `Record fields -> `Record (List.map (fun (name, v) -> (name, uv v)) fields)
       | `Variant (name, v) -> `Variant (name, uv v)
       | `LocalFunction (defs, env, var) ->
-          `RecFunction (List.map (fun f -> f, IntMap.find f funs) defs,
+          `RecFunction (List.map (fun f -> f, (try IntMap.find f funs with NotFound s -> failwith ("Uncompressing a `LocalFunction: " ^ s))) defs,
                         uncompress_env envs env,
                         var,
                         `Local)
       | `GlobalFunction (defs, f) ->
-          `RecFunction (List.map (fun f -> f, IntMap.find f funs) defs,
+          `RecFunction (List.map (fun f -> f, (try IntMap.find f funs with NotFound s -> failwith ("Uncompressing a `GlobalFunction: " ^ s))) defs,
                         localise globals f,
                         f,
                         `Global)
       | `PrimitiveFunction f -> `PrimitiveFunction (f,None)
       | `ClientFunction f -> `ClientFunction f
       | `Continuation cont -> `Continuation (uncompress_continuation envs cont)
+  ) with NotFound str -> failwith("In uncompress_t: " ^ str)
 and uncompress_env ((globals, scopes, _conts, _funs) as envs) env : env =
   try
   List.fold_left
@@ -540,7 +544,7 @@ let escape =
 
 (** {1 Pretty-printing values} *)
 
-let string_of_cont = Show_continuation.show 
+let string_of_cont = Show_continuation.show
 
 exception Not_tuple
 
